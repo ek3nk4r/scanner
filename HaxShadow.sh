@@ -19,8 +19,7 @@ readonly RESET='\033[0m'
 
 # Configuration
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-readonly TIMESTAMP=$(date +%s)
-readonly OUTPUT_DIR="${SCRIPT_DIR}/hakerpher_results_${TIMESTAMP}"
+readonly OUTPUT_DIR="${SCRIPT_DIR}/out"
 readonly LOG_FILE="${OUTPUT_DIR}/scan.log"
 readonly MAX_PARALLEL=10
 readonly HTTPX_THREADS=300
@@ -126,25 +125,29 @@ validate_domain() {
 }
 
 get_user_input() {
-    echo ""
-    printf "%b%b━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%b\n" "$BOLD" "$CYAN" "$RESET"
-    printf "%b%b           Target Configuration%b\n" "$BOLD" "$CYAN" "$RESET"
-    printf "%b%b━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%b\n" "$BOLD" "$CYAN" "$RESET"
-    echo ""
-    
-    read -p "$(printf '%bEnter target domain or file path:%b ' "$YELLOW" "$RESET")" INPUT
-    
+    if [ $# -gt 0 ]; then
+        INPUT="$1"
+    else
+        echo ""
+        printf "%b%b━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%b\n" "$BOLD" "$CYAN" "$RESET"
+        printf "%b%b           Target Configuration%b\n" "$BOLD" "$CYAN" "$RESET"
+        printf "%b%b━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%b\n" "$BOLD" "$CYAN" "$RESET"
+        echo ""
+
+        read -p "$(printf '%bEnter target domain or file path:%b ' "$YELLOW" "$RESET")" INPUT
+    fi
+
     if [ -z "$INPUT" ]; then
         log_error "Input cannot be empty"
         exit 1
     fi
-    
+
     # Check if it's a file
     if [ -f "$INPUT" ]; then
         echo "$INPUT"
         return 0
     fi
-    
+
     # Validate as domain
     local cleaned_domain
     if cleaned_domain=$(validate_domain "$INPUT"); then
@@ -351,7 +354,7 @@ main() {
     check_dependencies
     
     # Get user input
-    local input=$(get_user_input)
+    local input=$(get_user_input "$@")
     
     # Prepare targets
     local targets_file=$(prepare_targets "$input")
