@@ -2,11 +2,11 @@
 
 #=============================================================================
 # HakerPher - Advanced Web Security Scanner
-# Version: 2.0
+# Version: 2.1
 # Author: ~/.TEAM_DH049
 #=============================================================================
 
-set -euo pipefail
+set -eo pipefail
 
 # ANSI Color Codes
 readonly RED='\033[91m'
@@ -48,34 +48,36 @@ print_banner() {
 ██║  ██║██║  ██║██║  ██╗███████╗██║  ██║██║  ██║██║  ██║███████╗██║  ██║
 ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝
                                                                           
-                        Advanced Web Security Scanner v2.0
+                        Advanced Web Security Scanner v2.1
                               by ~/.TEAM_DH049
 EOF
     echo -e "${RESET}"
 }
 
-log() {
-    local level=$1
-    shift
+log_msg() {
+    local color=$1
+    local level=$2
+    shift 2
     local message="$*"
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    echo -e "[${timestamp}] [${level}] ${message}" | tee -a "$LOG_FILE"
+    echo -e "${color}[${level}]${RESET} ${message}"
+    echo "[${timestamp}] [${level}] ${message}" >> "$LOG_FILE" 2>/dev/null || true
 }
 
 log_info() {
-    echo -e "${GREEN}[INFO]${RESET} $*" | tee -a "$LOG_FILE"
+    log_msg "$GREEN" "INFO" "$@"
 }
 
 log_warn() {
-    echo -e "${YELLOW}[WARN]${RESET} $*" | tee -a "$LOG_FILE"
+    log_msg "$YELLOW" "WARN" "$@"
 }
 
 log_error() {
-    echo -e "${RED}[ERROR]${RESET} $*" | tee -a "$LOG_FILE"
+    log_msg "$RED" "ERROR" "$@"
 }
 
 log_success() {
-    echo -e "${CYAN}[SUCCESS]${RESET} $*" | tee -a "$LOG_FILE"
+    log_msg "$CYAN" "SUCCESS" "$@"
 }
 
 check_dependencies() {
@@ -102,24 +104,49 @@ check_dependencies() {
     log_success "All required tools are installed"
 }
 
+validate_domain() {
+    local domain=$1
+    # Remove http:// or https://
+    domain=$(echo "$domain" | sed -e 's|^https\?://||' -e 's|/.*||')
+    
+    # Check if it's a valid domain format
+    if [[ "$domain" =~ ^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$ ]]; then
+        echo "$domain"
+        return 0
+    else
+        return 1
+    fi
+}
+
 get_user_input() {
     echo ""
-    echo -e "${BOLD}${CYAN}Target Configuration${RESET}"
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    
-    read -p "$(echo -e ${YELLOW}Enter target domain or subdomains list file:${RESET} )" INPUT
+    echo -e "${BOLD}${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo -e "${BOLD}${CYAN}           Target Configuration${RESET}"
+    echo -e "${BOLD}${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo ""
+    read -p "$(echo -e ${YELLOW}Enter target domain or file path:${RESET} )" INPUT
     
     if [ -z "$INPUT" ]; then
         log_error "Input cannot be empty"
         exit 1
     fi
     
-    if [ ! -f "$INPUT" ] && [[ ! "$INPUT" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$ ]]; then
-        log_error "Invalid domain format or file not found"
-        exit 1
+    # Check if it's a file
+    if [ -f "$INPUT" ]; then
+        echo "$INPUT"
+        return 0
     fi
     
-    echo "$INPUT"
+    # Validate as domain
+    local cleaned_domain
+    if cleaned_domain=$(validate_domain "$INPUT"); then
+        echo "$cleaned_domain"
+        return 0
+    else
+        log_error "Invalid domain format: $INPUT"
+        log_info "Expected format: example.com or https://example.com"
+        exit 1
+    fi
 }
 
 prepare_targets() {
@@ -128,14 +155,26 @@ prepare_targets() {
     
     if [ -f "$input" ]; then
         log_info "Reading targets from file: $input"
-        cat "$input" | sed 's|https\?://||g' | sed 's|/.*||' | sort -u > "$targets_file"
+        while IFS= read -r line; do
+            if [ -n "$line" ]; then
+                local cleaned
+                if cleaned=$(validate_domain "$line"); then
+                    echo "$cleaned"
+                fi
+            fi
+        done < "$input" | sort -u > "$targets_file"
     else
         log_info "Using single target: $input"
-        echo "$input" | sed 's|https\?://||g' | sed 's|/.*||' > "$targets_file"
+        echo "$input" > "$targets_file"
     fi
     
     local count=$(wc -l < "$targets_file")
-    log_info "Prepared ${count} target(s) for scanning"
+    if [ "$count" -eq 0 ]; then
+        log_error "No valid targets found"
+        exit 1
+    fi
+    
+    log_success "Prepared ${count} target(s) for scanning"
     echo "$targets_file"
 }
 
@@ -145,10 +184,18 @@ fetch_urls() {
     
     log_info "Fetching URLs using gau (parallel processing)..."
     
-    cat "$targets_file" | xargs -P"$MAX_PARALLEL" -I{} sh -c \
+    # Read targets and run gau for each
+    while IFS= read -r target; do
+        echo "$target"
+    done < "$targets_file" | xargs -P"$MAX_PARALLEL" -I{} sh -c \
         'gau "{}" 2>/dev/null || true' | sort -u > "$gau_output"
     
-    local count=$(wc -l < "$gau_output")
+    local count=$(wc -l < "$gau_output" 2>/dev/null || echo 0)
+    if [ "$count" -eq 0 ]; then
+        log_warn "No URLs found by gau"
+        return 1
+    fi
+    
     log_success "Collected ${count} URLs"
     echo "$gau_output"
 }
@@ -157,13 +204,18 @@ filter_urls() {
     local gau_output=$1
     local filtered_urls="${OUTPUT_DIR}/filtered_urls.txt"
     
-    log_info "Filtering URLs with query parameters and removing duplicates..."
+    log_info "Filtering URLs with query parameters..."
     
     grep -E '\?[^=]+=.+$' "$gau_output" 2>/dev/null | \
-        uro | \
+        uro 2>/dev/null | \
         sort -u > "$filtered_urls"
     
-    local count=$(wc -l < "$filtered_urls")
+    local count=$(wc -l < "$filtered_urls" 2>/dev/null || echo 0)
+    if [ "$count" -eq 0 ]; then
+        log_warn "No URLs with parameters found"
+        return 1
+    fi
+    
     log_success "Filtered to ${count} unique URLs with parameters"
     echo "$filtered_urls"
 }
@@ -184,6 +236,11 @@ check_live_urls() {
         -o "$live_urls" 2>/dev/null || true
     
     local count=$(wc -l < "$live_urls" 2>/dev/null || echo 0)
+    if [ "$count" -eq 0 ]; then
+        log_warn "No live URLs found"
+        return 1
+    fi
+    
     log_success "Found ${count} live URLs"
     echo "$live_urls"
 }
@@ -193,7 +250,7 @@ run_nuclei_scan() {
     local nuclei_output="${OUTPUT_DIR}/nuclei_results.txt"
     local nuclei_json="${OUTPUT_DIR}/nuclei_results.json"
     
-    log_info "Running Nuclei DAST scan..."
+    log_info "Running Nuclei DAST scan (this may take a while)..."
     
     nuclei -l "$live_urls" \
         -dast \
@@ -246,8 +303,7 @@ generate_report() {
 }
 
 cleanup() {
-    log_info "Cleaning up temporary files..."
-    # Add any cleanup tasks here if needed
+    log_info "Scan completed"
 }
 
 #=============================================================================
@@ -259,10 +315,10 @@ main() {
     
     # Create output directory
     mkdir -p "$OUTPUT_DIR"
-    touch "$LOG_FILE"
     
     log_info "Starting HakerPher security scan..."
     log_info "Output directory: $OUTPUT_DIR"
+    echo ""
     
     # Check dependencies
     check_dependencies
@@ -273,25 +329,28 @@ main() {
     # Prepare targets
     local targets_file=$(prepare_targets "$input")
     
+    echo ""
+    log_info "Starting URL collection..."
+    
     # Fetch URLs
-    local gau_output=$(fetch_urls "$targets_file")
+    local gau_output
+    if ! gau_output=$(fetch_urls "$targets_file"); then
+        log_error "Failed to collect URLs. Exiting."
+        exit 1
+    fi
     
     # Filter URLs
-    local filtered_urls=$(filter_urls "$gau_output")
-    
-    # Check if we have any URLs to scan
-    if [ ! -s "$filtered_urls" ]; then
-        log_warn "No URLs with parameters found. Exiting."
-        exit 0
+    local filtered_urls
+    if ! filtered_urls=$(filter_urls "$gau_output"); then
+        log_error "No URLs with parameters found. Exiting."
+        exit 1
     fi
     
     # Check live URLs
-    local live_urls=$(check_live_urls "$filtered_urls")
-    
-    # Check if we have any live URLs
-    if [ ! -s "$live_urls" ]; then
-        log_warn "No live URLs found. Exiting."
-        exit 0
+    local live_urls
+    if ! live_urls=$(check_live_urls "$filtered_urls"); then
+        log_error "No live URLs found. Exiting."
+        exit 1
     fi
     
     # Run Nuclei scan
@@ -303,25 +362,34 @@ main() {
     # Display results
     echo ""
     echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-    echo -e "${BOLD}${CYAN}Scan Complete!${RESET}"
+    echo -e "${BOLD}${CYAN}            Scan Complete!${RESET}"
     echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
     echo ""
-    log_success "All results saved to: $OUTPUT_DIR"
+    log_success "Results directory: $OUTPUT_DIR"
     log_success "Detailed report: $report_file"
     echo ""
     
     if [ -s "$nuclei_output" ]; then
-        log_warn "Vulnerabilities detected! Check the report for details."
+        local vuln_count=$(wc -l < "$nuclei_output")
+        echo -e "${RED}${BOLD}⚠ WARNING: ${vuln_count} vulnerabilities detected!${RESET}"
         echo -e "${YELLOW}Review: $nuclei_output${RESET}"
     else
-        log_info "No vulnerabilities found. All scanned URLs appear secure."
+        echo -e "${GREEN}✓ No vulnerabilities found. All scanned URLs appear secure.${RESET}"
     fi
     
     echo ""
-    cleanup
+    echo -e "${BLUE}Files generated:${RESET}"
+    echo -e "  • Targets: ${OUTPUT_DIR}/targets.txt"
+    echo -e "  • All URLs: ${OUTPUT_DIR}/gau_urls.txt"
+    echo -e "  • Filtered URLs: ${OUTPUT_DIR}/filtered_urls.txt"
+    echo -e "  • Live URLs: ${OUTPUT_DIR}/live_urls.txt"
+    echo -e "  • Vulnerabilities: ${OUTPUT_DIR}/nuclei_results.txt"
+    echo -e "  • JSON Report: ${OUTPUT_DIR}/nuclei_results.json"
+    echo -e "  • Full Report: ${OUTPUT_DIR}/scan_report.txt"
+    echo ""
 }
 
-# Trap errors and cleanup
+# Trap cleanup
 trap cleanup EXIT
 
 # Run main function
