@@ -206,35 +206,70 @@ fetch_urls() {
     fi
 
     log_info "Fetching URLs using gau..."
-    
+
     # Create empty files
     : > "$gau_output"
     : > "$temp_file"
-    
+
     # Process each target
     local target_count=0
     while IFS= read -r target || [ -n "$target" ]; do
         if [ -n "$target" ]; then
             target_count=$((target_count + 1))
             printf "  Scanning: %s\r" "$target"
-            gau "$target" 2>/dev/null >> "$temp_file" || true
+
+            # Try multiple gau options for better results
+            {
+                # Standard gau scan
+                gau "$target" 2>/dev/null || true
+
+                # Try with different providers if available
+                gau --providers wayback,commoncrawl,otx,urlscan "$target" 2>/dev/null || true
+
+                # Try with verbose output to debug
+                echo "DEBUG: Attempting to fetch URLs for $target" >&2
+                gau "$target" --verbose 2>&1 | grep -v "DEBUG:" || true
+
+            } >> "$temp_file" 2>> "${OUTPUT_DIR}/gau_debug.log"
         fi
     done < "$targets_file"
-    
+
     echo ""
-    
+
     # Remove duplicates and save
     if [ -f "$temp_file" ]; then
         sort -u "$temp_file" > "$gau_output"
         rm -f "$temp_file"
     fi
-    
+
     local count=$(wc -l < "$gau_output" 2>/dev/null || echo 0)
     if [ "$count" -eq 0 ]; then
         log_warn "No URLs found by gau"
+        log_info "This could be due to:"
+        log_info "  - Target domain has no public archive data"
+        log_info "  - Domain is too new or not indexed"
+        log_info "  - Geographic restrictions or firewall blocking"
+        log_info "  - Gau providers may be rate-limited"
+
+        # Create fallback with basic URLs
+        log_info "Creating fallback URL list..."
+        while IFS= read -r target || [ -n "$target" ]; do
+            if [ -n "$target" ]; then
+                echo "https://$target" >> "$gau_output"
+                echo "http://$target" >> "$gau_output"
+            fi
+        done < "$targets_file"
+
+        count=$(wc -l < "$gau_output" 2>/dev/null || echo 0)
+        if [ "$count" -gt 0 ]; then
+            log_success "Created fallback with ${count} basic URLs"
+            echo "$gau_output"
+            return 0
+        fi
+
         return 1
     fi
-    
+
     log_success "Collected ${count} URLs from ${target_count} target(s)"
     echo "$gau_output"
 }
@@ -377,22 +412,42 @@ main() {
     # Fetch URLs
     local gau_output
     if ! gau_output=$(fetch_urls "$targets_file"); then
-        log_error "Failed to collect URLs. Exiting."
-        exit 1
+        log_warn "Failed to collect URLs, creating minimal target list..."
+        # Create minimal target file with just the domain
+        gau_output="${OUTPUT_DIR}/gau_urls.txt"
+        while IFS= read -r target || [ -n "$target" ]; do
+            if [ -n "$target" ]; then
+                echo "https://$target" > "$gau_output"
+                echo "http://$target" >> "$gau_output"
+            fi
+        done < "$targets_file"
     fi
     
     # Filter URLs
     local filtered_urls
     if ! filtered_urls=$(filter_urls "$gau_output"); then
-        log_error "No URLs with parameters found. Exiting."
-        exit 1
+        log_warn "No URLs with parameters found, continuing with basic URLs..."
+        # Use gau output directly as fallback
+        filtered_urls="$gau_output"
     fi
-    
+
     # Check live URLs
     local live_urls
     if ! live_urls=$(check_live_urls "$filtered_urls"); then
-        log_error "No live URLs found. Exiting."
-        exit 1
+        log_warn "No live URLs found, but continuing with nuclei scan anyway..."
+        # Use filtered URLs directly as fallback
+        live_urls="$filtered_urls"
+
+        # Final fallback: create a minimal URL list if nothing else works
+        if [ ! -s "$live_urls" ]; then
+            log_warn "Creating final fallback URL list..."
+            live_urls="${OUTPUT_DIR}/live_urls.txt"
+            while IFS= read -r target || [ -n "$target" ]; do
+                if [ -n "$target" ]; then
+                    echo "https://$target" > "$live_urls"
+                fi
+            done < "$targets_file"
+        fi
     fi
     
     # Run Nuclei scan
