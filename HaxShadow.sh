@@ -114,9 +114,9 @@ validate_domain() {
     local domain=$1
     # Remove protocol and path
     domain=$(echo "$domain" | sed -e 's|^https\?://||' -e 's|/.*||')
-    
+
     # Validate domain format
-    if [[ "$domain" =~ ^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$ ]]; then
+    if echo "$domain" | grep -E '^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$' > /dev/null 2>&1; then
         echo "$domain"
         return 0
     else
@@ -127,6 +127,7 @@ validate_domain() {
 get_user_input() {
     if [ $# -gt 0 ]; then
         INPUT="$1"
+        log_info "Input received: $INPUT"
     else
         echo ""
         printf "%b%b━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%b\n" "$BOLD" "$CYAN" "$RESET"
