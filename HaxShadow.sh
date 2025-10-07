@@ -19,7 +19,7 @@ readonly RESET='\033[0m'
 
 # Configuration
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-readonly OUTPUT_DIR="${SCRIPT_DIR}/out"
+readonly OUTPUT_DIR="${SCRIPT_DIR}/out_$(date +%s)"
 readonly LOG_FILE="${OUTPUT_DIR}/scan.log"
 readonly MAX_PARALLEL=10
 readonly HTTPX_THREADS=300
@@ -163,7 +163,7 @@ get_user_input() {
 prepare_targets() {
     local input=$1
     local targets_file="${OUTPUT_DIR}/targets.txt"
-    
+
     if [ -f "$input" ]; then
         log_info "Reading targets from file: $input"
         while IFS= read -r line || [ -n "$line" ]; do
@@ -178,13 +178,18 @@ prepare_targets() {
         log_info "Using single target: $input"
         echo "$input" > "$targets_file"
     fi
-    
+
+    if [ ! -f "$targets_file" ]; then
+        log_error "Failed to create targets file: $targets_file"
+        exit 1
+    fi
+
     local count=$(wc -l < "$targets_file" 2>/dev/null || echo 0)
     if [ "$count" -eq 0 ]; then
         log_error "No valid targets found"
         exit 1
     fi
-    
+
     log_success "Prepared ${count} target(s) for scanning"
     echo "$targets_file"
 }
@@ -193,7 +198,12 @@ fetch_urls() {
     local targets_file=$1
     local gau_output="${OUTPUT_DIR}/gau_urls.txt"
     local temp_file="${OUTPUT_DIR}/temp_gau.txt"
-    
+
+    if [ ! -f "$targets_file" ]; then
+        log_error "Targets file not found: $targets_file"
+        return 1
+    fi
+
     log_info "Fetching URLs using gau..."
     
     # Create empty files
