@@ -19,8 +19,8 @@ readonly RESET='\033[0m'
 
 # Configuration
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-readonly TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-readonly OUTPUT_DIR="${SCRIPT_DIR}/hakerpher_${TIMESTAMP}"
+readonly TIMESTAMP=$(date +%s)
+readonly OUTPUT_DIR="${SCRIPT_DIR}/hakerpher_results_${TIMESTAMP}"
 readonly LOG_FILE="${OUTPUT_DIR}/scan.log"
 readonly MAX_PARALLEL=10
 readonly HTTPX_THREADS=300
