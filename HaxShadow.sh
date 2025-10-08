@@ -83,9 +83,21 @@ if [ -s "$FILTERED_URLS_FILE" ]; then
 
     # Run XSStrike with single instance to avoid multiple banners
     echo -e "${GREEN}[INFO] XSStrike: Starting XSS scan...${RESET}"
-    xsstrike --fuzzer --delay 1 --threads 3 --skip-dom --quiet --seeds "$FILTERED_URLS_FILE" >> "$XSSTRIKE_RESULTS" 2>&1 || {
+    # Suppress XSStrike banners and run scan
+    {
+        xsstrike --fuzzer --delay 1 --threads 3 --skip-dom --skip --console-log-level ERROR --seeds "$FILTERED_URLS_FILE" 2>/dev/null
+    } | grep -v "XSStrike" | grep -v "v3.1.5" >> "$XSSTRIKE_RESULTS" 2>/dev/null || {
         echo -e "${GREEN}[INFO] XSStrike failed, trying alternative method...${RESET}"
-        xargs -a "$FILTERED_URLS_FILE" -I@ bash -c 'xsstrike -u "@" --fuzzer --delay 2 --threads 1 --skip-dom --quiet' >> "$XSSTRIKE_RESULTS" 2>/dev/null || true
+        # Alternative method: test URLs one by one with banner suppression
+        echo "# XSStrike Results" > "$XSSTRIKE_RESULTS"
+        while IFS= read -r url; do
+            if [ ! -z "$url" ]; then
+                echo -e "\n[Testing] $url" >> "$XSSTRIKE_RESULTS"
+                {
+                    xsstrike -u "$url" --fuzzer --delay 2 --threads 1 --skip-dom --skip --console-log-level ERROR 2>/dev/null
+                } | grep -v "XSStrike" | grep -v "v3.1.5" | head -10 >> "$XSSTRIKE_RESULTS" 2>/dev/null || true
+            fi
+        done < "$FILTERED_URLS_FILE"
     }
 fi
 
