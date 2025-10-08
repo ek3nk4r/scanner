@@ -7,20 +7,10 @@ RESET='\033[0m'
 
 # ASCII art banner
 echo -e "${RED}"
-cat << "EOF"
-██╗  ██╗ █████╗ ██╗  ██╗███████╗██████╗ ██╗  ██╗███████╗██████╗ 
-██║  ██║██╔══██╗██║ ██╔╝██╔════╝██╔══██╗██║  ██║██╔════╝██╔══██╗
-███████║███████║█████╔╝ █████╗  ██████╔╝███████║█████╗  ██████╔╝
-██╔══██║██╔══██║██╔═██╗ ██╔══╝  ██╔══██╗██╔══██║██╔══╝  ██╔══██╗
-██║  ██║██║  ██║██║  ██╗███████╗██║  ██║██║  ██║███████╗██║  ██║
-╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝
-      
-                                       by ~/.TEAM_DH049
-EOF
 echo -e "${RESET}"
 
 # Ensure required tools are installed
-REQUIRED_TOOLS=("gau" "uro" "httpx-toolkit" "nuclei")
+REQUIRED_TOOLS=("gau" "uro" "httpx" "nuclei")
 for tool in "${REQUIRED_TOOLS[@]}"; do
     if ! command -v "$tool" &>/dev/null; then
         echo -e "${RED}[ERROR] $tool is not installed. Please install it and try again.${RESET}"
@@ -28,22 +18,17 @@ for tool in "${REQUIRED_TOOLS[@]}"; do
     fi
 done
 
-# Ask the user for the domain or subdomains list file
-read -p "Enter the target domain or subdomains list file: " INPUT
-if [ -z "$INPUT" ]; then
-    echo -e "${RED}[ERROR] Input cannot be empty.${RESET}"
+# Check if URL argument is provided
+if [ -z "$1" ]; then
+    echo -e "${RED}[ERROR] Please provide a target URL as an argument.${RESET}"
+    echo -e "${RED}[USAGE] $0 <target_url>${RESET}"
     exit 1
 fi
 
-# Determine if input is a file or single domain
-if [ -f "$INPUT" ]; then
-    TARGETS=$(cat "$INPUT")
-else
-    TARGETS="$INPUT"
-fi
+TARGET_URL="$1"
 
 # Remove protocols (http/https) if present
-TARGETS=$(echo "$TARGETS" | sed 's|https\?://||g')
+TARGET=$(echo "$TARGET_URL" | sed 's|https\?://||g')
 
 # Create temporary files
 GAU_FILE=$(mktemp)
@@ -52,15 +37,15 @@ NUCLEI_RESULTS="nuclei_results.txt"
 
 # Step 1: Fetch URLs in Parallel using xargs
 echo -e "${GREEN}[INFO] Fetching URLs using gau in parallel...${RESET}"
-echo "$TARGETS" | xargs -P10 -I{} sh -c 'gau "{}" >> "$1"' _ "$GAU_FILE"
+echo "$TARGET" | xargs -P10 -I{} sh -c 'gau "{}" >> "$1"' _ "$GAU_FILE"
 
 # Step 2: Filter URLs with query parameters
 echo -e "${GREEN}[INFO] Filtering URLs with query parameters...${RESET}"
 grep -E '\?[^=]+=.+$' "$GAU_FILE" | uro | sort -u > "$FILTERED_URLS_FILE"
 
 # Step 3: Check live URLs using httpx
-echo -e "${GREEN}[INFO] Checking for live URLs using httpx-toolkit...${RESET}"
-httpx-toolkit -silent -t 300 -rl 200 < "$FILTERED_URLS_FILE" > "$FILTERED_URLS_FILE.tmp"
+echo -e "${GREEN}[INFO] Checking for live URLs using httpx...${RESET}"
+httpx -silent -t 300 -rl 200 < "$FILTERED_URLS_FILE" > "$FILTERED_URLS_FILE.tmp"
 mv "$FILTERED_URLS_FILE.tmp" "$FILTERED_URLS_FILE"
 
 # Step 4: Run nuclei for DAST scanning
