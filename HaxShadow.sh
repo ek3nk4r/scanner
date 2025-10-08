@@ -1,8 +1,8 @@
 #!/bin/bash
 
 #=============================================================================
-# HakerPher - Advanced Web Security Scanner
-# Version: 2.2
+# HakerPher - Advanced Web Security Scanner (FIXED)
+# Version: 2.3
 # Author: ~/.TEAM_DH049
 #=============================================================================
 
@@ -21,7 +21,6 @@ readonly RESET='\033[0m'
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly OUTPUT_DIR="${SCRIPT_DIR}/out_$(date +%s)"
 readonly LOG_FILE="${OUTPUT_DIR}/scan.log"
-readonly MAX_PARALLEL=10
 readonly HTTPX_THREADS=300
 readonly HTTPX_RATE_LIMIT=200
 readonly NUCLEI_RETRIES=2
@@ -40,16 +39,12 @@ declare -A REQUIRED_TOOLS=(
 
 print_banner() {
     echo -e "${RED}${BOLD}"
-    cat << "EOF"
-██╗  ██╗ █████╗ ██╗  ██╗███████╗██████╗ ██████╗ ██╗  ██╗███████╗██████╗ 
-██║  ██║██╔══██╗██║ ██╔╝██╔════╝██╔══██╗██╔══██╗██║  ██║██╔════╝██╔══██╗
-███████║███████║█████╔╝ █████╗  ██████╔╝██████╔╝███████║█████╗  ██████╔╝
-██╔══██║██╔══██║██╔═██╗ ██╔══╝  ██╔══██╗██╔══██╗██╔══██║██╔══╝  ██╔══██╗
-██║  ██║██║  ██║██║  ██╗███████╗██║  ██║██║  ██║██║  ██║███████╗██║  ██║
-╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝
-                                                                          
-                        Advanced Web Security Scanner v2.2
-                              by ~/.TEAM_DH049
+    cat << "EOF" 
+    ╔═══════════════════════════════════════════════════╗
+    ║   HakerPher - Web Security Scanner v2.3          ║
+    ║   Advanced DAST with Nuclei Integration          ║
+    ║   by ~/.TEAM_DH049                               ║
+    ╚═══════════════════════════════════════════════════╝
 EOF
     echo -e "${RESET}"
 }
@@ -61,30 +56,17 @@ log_msg() {
     local message="$*"
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
     
-    # Print to console
     printf "%b[%s]%b %s\n" "$color" "$level" "$RESET" "$message"
     
-    # Write to log file
     if [ -f "$LOG_FILE" ]; then
         printf "[%s] [%s] %s\n" "$timestamp" "$level" "$message" >> "$LOG_FILE"
     fi
 }
 
-log_info() {
-    log_msg "$GREEN" "INFO" "$@"
-}
-
-log_warn() {
-    log_msg "$YELLOW" "WARN" "$@"
-}
-
-log_error() {
-    log_msg "$RED" "ERROR" "$@"
-}
-
-log_success() {
-    log_msg "$CYAN" "SUCCESS" "$@"
-}
+log_info() { log_msg "$GREEN" "INFO" "$@"; }
+log_warn() { log_msg "$YELLOW" "WARN" "$@"; }
+log_error() { log_msg "$RED" "ERROR" "$@"; }
+log_success() { log_msg "$CYAN" "SUCCESS" "$@"; }
 
 check_dependencies() {
     log_info "Checking required tools..."
@@ -103,7 +85,6 @@ check_dependencies() {
         for tool in "${missing_tools[@]}"; do
             printf "%b  go install %s%b\n" "$BLUE" "${REQUIRED_TOOLS[$tool]}" "$RESET"
         done
-        echo ""
         exit 1
     fi
     
@@ -112,85 +93,67 @@ check_dependencies() {
 
 validate_domain() {
     local domain=$1
-    # Remove protocol and path
-    domain=$(echo "$domain" | sed -e 's|^https\?://||' -e 's|/.*||')
-
-    # Validate domain format
-    if echo "$domain" | grep -E '^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$' > /dev/null 2>&1; then
+    domain=$(echo "$domain" | sed -e 's|^https\?://||' -e 's|/.*||' -e 's|:.*||')
+    
+    if echo "$domain" | grep -qE '^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$'; then
         echo "$domain"
         return 0
-    else
-        return 1
     fi
+    return 1
 }
 
 get_user_input() {
     if [ $# -gt 0 ]; then
-        INPUT="$1"
-        log_info "Input received: $INPUT"
-    else
-        echo ""
-        printf "%b%b━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%b\n" "$BOLD" "$CYAN" "$RESET"
-        printf "%b%b           Target Configuration%b\n" "$BOLD" "$CYAN" "$RESET"
-        printf "%b%b━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%b\n" "$BOLD" "$CYAN" "$RESET"
-        echo ""
-
-        read -p "$(printf '%bEnter target domain or file path:%b ' "$YELLOW" "$RESET")" INPUT
+        echo "$1"
+        return 0
     fi
-
+    
+    echo ""
+    printf "%b%b━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%b\n" "$BOLD" "$CYAN" "$RESET"
+    printf "%b%b           Target Configuration%b\n" "$BOLD" "$CYAN" "$RESET"
+    printf "%b%b━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%b\n" "$BOLD" "$CYAN" "$RESET"
+    echo ""
+    
+    read -p "$(printf '%bEnter target domain or file path:%b ' "$YELLOW" "$RESET")" INPUT
+    
     if [ -z "$INPUT" ]; then
         log_error "Input cannot be empty"
         exit 1
     fi
-
-    # Check if it's a file
-    if [ -f "$INPUT" ]; then
-        echo "$INPUT"
-        return 0
-    fi
-
-    # Validate as domain
-    local cleaned_domain
-    if cleaned_domain=$(validate_domain "$INPUT"); then
-        echo "$cleaned_domain"
-        return 0
-    else
-        log_error "Invalid domain format: $INPUT"
-        log_info "Expected: example.com or https://example.com"
-        exit 1
-    fi
+    
+    echo "$INPUT"
 }
 
 prepare_targets() {
     local input=$1
     local targets_file="${OUTPUT_DIR}/targets.txt"
-
+    
     if [ -f "$input" ]; then
         log_info "Reading targets from file: $input"
         while IFS= read -r line || [ -n "$line" ]; do
-            if [ -n "$line" ]; then
-                local cleaned
-                if cleaned=$(validate_domain "$line"); then
-                    echo "$cleaned"
-                fi
+            [ -z "$line" ] && continue
+            local cleaned
+            if cleaned=$(validate_domain "$line"); then
+                echo "$cleaned"
             fi
         done < "$input" | sort -u > "$targets_file"
     else
-        log_info "Using single target: $input"
-        echo "$input" > "$targets_file"
+        local cleaned
+        if cleaned=$(validate_domain "$input"); then
+            log_info "Using single target: $cleaned"
+            echo "$cleaned" > "$targets_file"
+        else
+            log_error "Invalid domain format: $input"
+            exit 1
+        fi
     fi
-
-    if [ ! -f "$targets_file" ]; then
-        log_error "Failed to create targets file: $targets_file"
-        exit 1
-    fi
-
+    
     local count=$(wc -l < "$targets_file" 2>/dev/null || echo 0)
     if [ "$count" -eq 0 ]; then
         log_error "No valid targets found"
         exit 1
     fi
-
+    
     log_success "Prepared ${count} target(s) for scanning"
     echo "$targets_file"
 }
@@ -198,79 +161,44 @@ prepare_targets() {
 fetch_urls() {
     local targets_file=$1
     local gau_output="${OUTPUT_DIR}/gau_urls.txt"
-    local temp_file="${OUTPUT_DIR}/temp_gau.txt"
-
-    if [ ! -f "$targets_file" ]; then
-        log_error "Targets file not found: $targets_file"
-        return 1
-    fi
-
-    log_info "Fetching URLs using gau..."
-
-    # Create empty files
+    
+    log_info "Fetching URLs using gau (this may take a while)..."
     : > "$gau_output"
-    : > "$temp_file"
-
-    # Process each target
+    
     local target_count=0
-    while IFS= read -r target || [ -n "$target" ]; do
-        if [ -n "$target" ]; then
-            target_count=$((target_count + 1))
-            printf "  Scanning: %s\r" "$target"
-
-            # Try multiple gau options for better results
-            {
-                # Standard gau scan
-                gau "$target" 2>/dev/null || true
-
-                # Try with different providers if available
-                gau --providers wayback,commoncrawl,otx,urlscan "$target" 2>/dev/null || true
-
-                # Try with verbose output to debug
-                echo "DEBUG: Attempting to fetch URLs for $target" >&2
-                gau "$target" --verbose 2>&1 | grep -v "DEBUG:" || true
-
-            } >> "$temp_file" 2>> "${OUTPUT_DIR}/gau_debug.log"
-        fi
+    while IFS= read -r target; do
+        [ -z "$target" ] && continue
+        target_count=$((target_count + 1))
+        
+        printf "  %b[%d]%b Scanning: %s\r" "$CYAN" "$target_count" "$RESET" "$target"
+        
+        {
+            gau "$target" 2>/dev/null || true
+            gau --providers wayback,commoncrawl,otx,urlscan "$target" 2>/dev/null || true
+        } | grep -v '^$' >> "$gau_output" || true
+        
     done < "$targets_file"
-
+    
     echo ""
-
-    # Remove duplicates and save
-    if [ -f "$temp_file" ]; then
-        sort -u "$temp_file" > "$gau_output"
-        rm -f "$temp_file"
+    
+    if [ -f "$gau_output" ]; then
+        sort -u "$gau_output" -o "$gau_output"
     fi
-
+    
     local count=$(wc -l < "$gau_output" 2>/dev/null || echo 0)
+    
     if [ "$count" -eq 0 ]; then
-        log_warn "No URLs found by gau"
-        log_info "This could be due to:"
-        log_info "  - Target domain has no public archive data"
-        log_info "  - Domain is too new or not indexed"
-        log_info "  - Geographic restrictions or firewall blocking"
-        log_info "  - Gau providers may be rate-limited"
-
-        # Create fallback with basic URLs
-        log_info "Creating fallback URL list..."
-        while IFS= read -r target || [ -n "$target" ]; do
-            if [ -n "$target" ]; then
-                echo "https://$target" >> "$gau_output"
-                echo "http://$target" >> "$gau_output"
-            fi
+        log_warn "No URLs found by gau, creating fallback URLs..."
+        while IFS= read -r target; do
+            [ -z "$target" ] && continue
+            echo "https://$target" >> "$gau_output"
+            echo "http://$target" >> "$gau_output"
         done < "$targets_file"
-
+        
         count=$(wc -l < "$gau_output" 2>/dev/null || echo 0)
-        if [ "$count" -gt 0 ]; then
-            log_success "Created fallback with ${count} basic URLs"
-            echo "$gau_output"
-            return 0
-        fi
-
-        return 1
     fi
-
-    log_success "Collected ${count} URLs from ${target_count} target(s)"
+    
+    log_success "Collected ${count} URLs"
     echo "$gau_output"
 }
 
@@ -280,22 +208,20 @@ filter_urls() {
     
     log_info "Filtering URLs with query parameters..."
     
-    if [ ! -f "$gau_output" ]; then
-        log_error "GAU output file not found"
-        return 1
-    fi
-    
-    grep -E '\?[^=]+=.+$' "$gau_output" 2>/dev/null | \
+    # Filter URLs with parameters: must have ?key=value format
+    grep -E '\?[^=&]+=[^&]+' "$gau_output" 2>/dev/null | \
         uro 2>/dev/null | \
-        sort -u > "$filtered_urls" || true
+        sort -u > "$filtered_urls" 2>/dev/null || true
     
     local count=$(wc -l < "$filtered_urls" 2>/dev/null || echo 0)
+    
     if [ "$count" -eq 0 ]; then
-        log_warn "No URLs with parameters found"
-        return 1
+        log_warn "No URLs with parameters found, using all URLs"
+        cp "$gau_output" "$filtered_urls"
+        count=$(wc -l < "$filtered_urls" 2>/dev/null || echo 0)
     fi
     
-    log_success "Filtered to ${count} unique URLs with parameters"
+    log_success "Filtered to ${count} URLs"
     echo "$filtered_urls"
 }
 
@@ -308,16 +234,18 @@ check_live_urls() {
     httpx -silent \
         -t "$HTTPX_THREADS" \
         -rl "$HTTPX_RATE_LIMIT" \
-        -mc 200,201,202,203,204,301,302,307,308,401,403,405,500 \
+        -mc 200,201,301,302,307,308,401,403 \
         -follow-redirects \
         -no-color \
         -l "$filtered_urls" \
         -o "$live_urls" 2>/dev/null || true
     
     local count=$(wc -l < "$live_urls" 2>/dev/null || echo 0)
+    
     if [ "$count" -eq 0 ]; then
-        log_warn "No live URLs found"
-        return 1
+        log_warn "No live URLs found, using filtered URLs for scan"
+        cp "$filtered_urls" "$live_urls"
+        count=$(wc -l < "$live_urls" 2>/dev/null || echo 0)
     fi
     
     log_success "Found ${count} live URLs"
@@ -329,7 +257,7 @@ run_nuclei_scan() {
     local nuclei_output="${OUTPUT_DIR}/nuclei_results.txt"
     local nuclei_json="${OUTPUT_DIR}/nuclei_results.json"
     
-    log_info "Running Nuclei DAST scan (this may take a while)..."
+    log_info "Running Nuclei DAST scan (this may take several minutes)..."
     
     nuclei -l "$live_urls" \
         -dast \
@@ -339,6 +267,14 @@ run_nuclei_scan() {
         -json \
         -jsonl \
         -je "$nuclei_json" 2>/dev/null || true
+    
+    local count=$(wc -l < "$nuclei_output" 2>/dev/null || echo 0)
+    
+    if [ "$count" -gt 0 ]; then
+        log_warn "Found ${count} potential vulnerabilities"
+    else
+        log_success "No vulnerabilities detected"
+    fi
     
     echo "$nuclei_output"
 }
@@ -350,32 +286,36 @@ generate_report() {
     log_info "Generating scan report..."
     
     {
-        echo "=============================================="
-        echo "HakerPher Security Scan Report"
-        echo "=============================================="
+        echo "╔═══════════════════════════════════════════════════╗"
+        echo "║       HakerPher Security Scan Report              ║"
+        echo "╚═══════════════════════════════════════════════════╝"
+        echo ""
         echo "Scan Date: $(date)"
         echo "Output Directory: $OUTPUT_DIR"
         echo ""
-        echo "Summary:"
-        echo "  - Total URLs Found: $(wc -l < "${OUTPUT_DIR}/gau_urls.txt" 2>/dev/null || echo 0)"
-        echo "  - URLs with Parameters: $(wc -l < "${OUTPUT_DIR}/filtered_urls.txt" 2>/dev/null || echo 0)"
-        echo "  - Live URLs: $(wc -l < "${OUTPUT_DIR}/live_urls.txt" 2>/dev/null || echo 0)"
+        echo "═══════════════════════════════════════════════════"
+        echo "SUMMARY"
+        echo "═══════════════════════════════════════════════════"
+        echo "  • Total URLs Found:        $(wc -l < "${OUTPUT_DIR}/gau_urls.txt" 2>/dev/null || echo 0)"
+        echo "  • URLs with Parameters:    $(wc -l < "${OUTPUT_DIR}/filtered_urls.txt" 2>/dev/null || echo 0)"
+        echo "  • Live URLs:               $(wc -l < "${OUTPUT_DIR}/live_urls.txt" 2>/dev/null || echo 0)"
         
         if [ -s "$nuclei_output" ]; then
             local vuln_count=$(wc -l < "$nuclei_output")
-            echo "  - Vulnerabilities Found: $vuln_count"
+            echo "  • Vulnerabilities Found:   $vuln_count"
             echo ""
-            echo "Vulnerability Details:"
-            echo "---------------------------------------------"
+            echo "═══════════════════════════════════════════════════"
+            echo "VULNERABILITY DETAILS"
+            echo "═══════════════════════════════════════════════════"
             cat "$nuclei_output"
         else
-            echo "  - Vulnerabilities Found: 0"
+            echo "  • Vulnerabilities Found:   0"
             echo ""
-            echo "No vulnerabilities detected."
+            echo "✓ No vulnerabilities detected."
         fi
         
         echo ""
-        echo "=============================================="
+        echo "═══════════════════════════════════════════════════"
     } > "$report_file"
     
     echo "$report_file"
@@ -388,7 +328,6 @@ generate_report() {
 main() {
     print_banner
     
-    # Create output directory
     mkdir -p "$OUTPUT_DIR"
     touch "$LOG_FILE"
     
@@ -396,72 +335,45 @@ main() {
     log_info "Output directory: $OUTPUT_DIR"
     echo ""
     
-    # Check dependencies
     check_dependencies
+    echo ""
     
-    # Get user input
     local input=$(get_user_input "$@")
-    
-    # Prepare targets
     local targets_file=$(prepare_targets "$input")
-    
-    echo ""
-    log_info "Starting URL collection..."
     echo ""
     
-    # Fetch URLs
-    local gau_output
-    if ! gau_output=$(fetch_urls "$targets_file"); then
-        log_warn "Failed to collect URLs, creating minimal target list..."
-        # Create minimal target file with just the domain
-        gau_output="${OUTPUT_DIR}/gau_urls.txt"
-        while IFS= read -r target || [ -n "$target" ]; do
-            if [ -n "$target" ]; then
-                echo "https://$target" > "$gau_output"
-                echo "http://$target" >> "$gau_output"
-            fi
-        done < "$targets_file"
-    fi
+    log_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    log_info "PHASE 1: URL Collection"
+    log_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    local gau_output=$(fetch_urls "$targets_file")
+    echo ""
     
-    # Filter URLs
-    local filtered_urls
-    if ! filtered_urls=$(filter_urls "$gau_output"); then
-        log_warn "No URLs with parameters found, continuing with basic URLs..."
-        # Use gau output directly as fallback
-        filtered_urls="$gau_output"
-    fi
-
-    # Check live URLs
-    local live_urls
-    if ! live_urls=$(check_live_urls "$filtered_urls"); then
-        log_warn "No live URLs found, but continuing with nuclei scan anyway..."
-        # Use filtered URLs directly as fallback
-        live_urls="$filtered_urls"
-
-        # Final fallback: create a minimal URL list if nothing else works
-        if [ ! -s "$live_urls" ]; then
-            log_warn "Creating final fallback URL list..."
-            live_urls="${OUTPUT_DIR}/live_urls.txt"
-            while IFS= read -r target || [ -n "$target" ]; do
-                if [ -n "$target" ]; then
-                    echo "https://$target" > "$live_urls"
-                fi
-            done < "$targets_file"
-        fi
-    fi
+    log_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    log_info "PHASE 2: URL Filtering"
+    log_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    local filtered_urls=$(filter_urls "$gau_output")
+    echo ""
     
-    # Run Nuclei scan
+    log_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    log_info "PHASE 3: Live URL Detection"
+    log_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    local live_urls=$(check_live_urls "$filtered_urls")
+    echo ""
+    
+    log_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    log_info "PHASE 4: Nuclei DAST Scanning"
+    log_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     local nuclei_output=$(run_nuclei_scan "$live_urls")
+    echo ""
     
-    # Generate report
     local report_file=$(generate_report "$nuclei_output")
     
-    # Display results
     echo ""
-    printf "%b%b━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%b\n" "$BOLD" "$GREEN" "$RESET"
-    printf "%b%b            Scan Complete!%b\n" "$BOLD" "$CYAN" "$RESET"
-    printf "%b%b━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%b\n" "$BOLD" "$GREEN" "$RESET"
+    printf "%b%b╔═══════════════════════════════════════════════════╗%b\n" "$BOLD" "$GREEN" "$RESET"
+    printf "%b%b║            Scan Complete!                         ║%b\n" "$BOLD" "$CYAN" "$RESET"
+    printf "%b%b╚═══════════════════════════════════════════════════╝%b\n" "$BOLD" "$GREEN" "$RESET"
     echo ""
+    
     log_success "Results directory: $OUTPUT_DIR"
     log_success "Detailed report: $report_file"
     echo ""
@@ -475,17 +387,16 @@ main() {
     fi
     
     echo ""
-    printf "%bFiles generated:%b\n" "$BLUE" "$RESET"
-    echo "  • Targets: ${OUTPUT_DIR}/targets.txt"
-    echo "  • All URLs: ${OUTPUT_DIR}/gau_urls.txt"
-    echo "  • Filtered URLs: ${OUTPUT_DIR}/filtered_urls.txt"
-    echo "  • Live URLs: ${OUTPUT_DIR}/live_urls.txt"
-    echo "  • Vulnerabilities: ${OUTPUT_DIR}/nuclei_results.txt"
-    echo "  • JSON Report: ${OUTPUT_DIR}/nuclei_results.json"
-    echo "  • Full Report: ${OUTPUT_DIR}/report.txt"
-    echo "  • Log File: ${OUTPUT_DIR}/scan.log"
+    printf "%b%bFiles Generated:%b\n" "$BLUE" "$BOLD" "$RESET"
+    echo "  • Targets:           ${OUTPUT_DIR}/targets.txt"
+    echo "  • All URLs:          ${OUTPUT_DIR}/gau_urls.txt"
+    echo "  • Filtered URLs:     ${OUTPUT_DIR}/filtered_urls.txt"
+    echo "  • Live URLs:         ${OUTPUT_DIR}/live_urls.txt"
+    echo "  • Vulnerabilities:   ${OUTPUT_DIR}/nuclei_results.txt"
+    echo "  • JSON Report:       ${OUTPUT_DIR}/nuclei_results.json"
+    echo "  • Full Report:       ${OUTPUT_DIR}/report.txt"
+    echo "  • Log File:          ${OUTPUT_DIR}/scan.log"
     echo ""
 }
 
-# Run main function
 main "$@"
