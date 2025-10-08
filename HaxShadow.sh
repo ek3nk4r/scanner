@@ -42,6 +42,9 @@ DALFOX_RESULTS="dalfox_results.txt"
 echo -e "${GREEN}[INFO] Fetching URLs using gau...${RESET}"
 echo "$TARGET" | xargs -P10 -I{} sh -c 'gau "{}" >> "'$GAU_FILE'"' -- {}
 
+GAU_COUNT=$(wc -l < "$GAU_FILE" 2>/dev/null || echo "0")
+echo -e "${GREEN}[INFO] Gau found: $GAU_COUNT URLs${RESET}"
+
 # Fallback to waybackurls if gau found nothing
 if [ ! -s "$GAU_FILE" ]; then
     echo -e "${GREEN}[INFO] Gau found nothing, trying waybackurls...${RESET}"
@@ -49,6 +52,8 @@ if [ ! -s "$GAU_FILE" ]; then
     # Combine results if waybackurls found something
     if [ -s "$WAYBACK_FILE" ]; then
         cat "$WAYBACK_FILE" > "$GAU_FILE"
+        WAYBACK_COUNT=$(wc -l < "$GAU_FILE")
+        echo -e "${GREEN}[INFO] Waybackurls found: $WAYBACK_COUNT URLs${RESET}"
     fi
 fi
 
@@ -73,7 +78,15 @@ rm -f temp_urls.txt
 echo -e "${GREEN}[INFO] Running XSStrike for XSS testing...${RESET}"
 if [ -s "$FILTERED_URLS_FILE" ]; then
     echo -e "${GREEN}[INFO] XSStrike: Testing URLs with advanced XSS payloads...${RESET}"
-    xargs -a "$FILTERED_URLS_FILE" -I@ -P5 bash -c 'xsstrike -u "@" --fuzzer --delay 1 --threads 5 --skip-dom --quiet' >> "$XSSTRIKE_RESULTS" 2>/dev/null || true
+    URL_COUNT=$(wc -l < "$FILTERED_URLS_FILE")
+    echo -e "${GREEN}[INFO] Total URLs to test: $URL_COUNT${RESET}"
+
+    # Run XSStrike with single instance to avoid multiple banners
+    echo -e "${GREEN}[INFO] XSStrike: Starting XSS scan...${RESET}"
+    xsstrike --fuzzer --delay 1 --threads 3 --skip-dom --quiet --seeds "$FILTERED_URLS_FILE" >> "$XSSTRIKE_RESULTS" 2>&1 || {
+        echo -e "${GREEN}[INFO] XSStrike failed, trying alternative method...${RESET}"
+        xargs -a "$FILTERED_URLS_FILE" -I@ bash -c 'xsstrike -u "@" --fuzzer --delay 2 --threads 1 --skip-dom --quiet' >> "$XSSTRIKE_RESULTS" 2>/dev/null || true
+    }
 fi
 
 echo -e "${GREEN}[INFO] Running Dalfox for XSS testing...${RESET}"
@@ -81,17 +94,21 @@ if [ -s "$FILTERED_URLS_FILE" ]; then
     echo -e "${GREEN}[INFO] Dalfox: Advanced XSS scanning with context awareness...${RESET}"
     dalfox file "$FILTERED_URLS_FILE" \
         --no-color \
-        --silent \
+        -S \
         --deep-domxss \
         --context-aware \
         --waf-evasion \
-        --worker 50 \
-        --delay 1000 \
+        --worker 30 \
+        --delay 1500 \
         --only-poc 'g,v' \
         --format plain \
         --ignore-return '404,403' \
         --skip-bav \
-        --skip-mining-all >> "$DALFOX_RESULTS" 2>/dev/null || true
+        --skip-mining-all \
+        --report >> "$DALFOX_RESULTS" 2>/dev/null || {
+        echo -e "${GREEN}[INFO] Dalfox advanced options failed, trying basic scan...${RESET}"
+        dalfox file "$FILTERED_URLS_FILE" --no-color -S --worker 20 >> "$DALFOX_RESULTS" 2>/dev/null || true
+    }
 fi
 
 # Step 4: Check live URLs using httpx
@@ -99,22 +116,59 @@ echo -e "${GREEN}[INFO] Checking for live URLs using httpx...${RESET}"
 httpx -silent -t 300 -rl 200 < "$FILTERED_URLS_FILE" > "$FILTERED_URLS_FILE.tmp"
 mv "$FILTERED_URLS_FILE.tmp" "$FILTERED_URLS_FILE"
 
+LIVE_COUNT=$(wc -l < "$FILTERED_URLS_FILE" 2>/dev/null || echo "0")
+echo -e "${GREEN}[INFO] Live URLs after httpx: $LIVE_COUNT${RESET}"
+
 # Step 5: Run nuclei for comprehensive scanning
 echo -e "${GREEN}[INFO] Running nuclei for comprehensive scanning...${RESET}"
+echo -e "${GREEN}[INFO] Nuclei: Scanning for vulnerabilities...${RESET}"
 nuclei -t xss,ssrf,sqli,injection,redirect,exposure,misconfiguration,informational -severity low,medium,high,critical -retries 2 -silent -o "$NUCLEI_RESULTS" < "$FILTERED_URLS_FILE"
 
-# Step 6: Show saved results
-echo -e "${GREEN}[INFO] Nuclei results saved to $NUCLEI_RESULTS${RESET}"
-echo -e "${GREEN}[INFO] XSStrike results saved to $XSSTRIKE_RESULTS${RESET}"
-echo -e "${GREEN}[INFO] Dalfox results saved to $DALFOX_RESULTS${RESET}"
-echo -e "${GREEN}[INFO] Filtered URLs saved to $FILTERED_URLS_FILE for manual testing.${RESET}"
+NUCLEI_COUNT=$(wc -l < "$NUCLEI_RESULTS" 2>/dev/null || echo "0")
+echo -e "${GREEN}[INFO] Nuclei found: $NUCLEI_COUNT potential issues${RESET}"
+
+# Step 6: Show detailed results summary
+echo -e "${GREEN}[INFO] =================================${RESET}"
+echo -e "${GREEN}[INFO] SCAN SUMMARY${RESET}"
+echo -e "${GREEN}[INFO] =================================${RESET}"
+
+echo -e "${GREEN}[INFO] Target: $TARGET_URL${RESET}"
+echo -e "${GREEN}[INFO] Gau URLs: $GAU_COUNT${RESET}"
+if [ ! -s "$GAU_FILE" ] && [ -s "$WAYBACK_FILE" ]; then
+    echo -e "${GREEN}[INFO] Wayback URLs: $(wc -l < "$WAYBACK_FILE" 2>/dev/null || echo "0")${RESET}"
+fi
+echo -e "${GREEN}[INFO] URLs with parameters: $(wc -l < "$FILTERED_URLS_FILE" 2>/dev/null || echo "0")${RESET}"
+echo -e "${GREEN}[INFO] Live URLs: $LIVE_COUNT${RESET}"
+
+# Show results file sizes
+echo -e "${GREEN}[INFO] =================================${RESET}"
+echo -e "${GREEN}[INFO] RESULTS${RESET}"
+echo -e "${GREEN}[INFO] =================================${RESET}"
+
+NUCLEI_COUNT=$(wc -l < "$NUCLEI_RESULTS" 2>/dev/null || echo "0")
+XSSTRIKE_COUNT=$(wc -l < "$XSSTRIKE_RESULTS" 2>/dev/null || echo "0")
+DALFOX_COUNT=$(wc -l < "$DALFOX_RESULTS" 2>/dev/null || echo "0")
+
+echo -e "${GREEN}[INFO] Nuclei findings: $NUCLEI_COUNT${RESET}"
+echo -e "${GREEN}[INFO] XSStrike findings: $XSSTRIKE_COUNT${RESET}"
+echo -e "${GREEN}[INFO] Dalfox findings: $DALFOX_COUNT${RESET}"
+
+echo -e "${GREEN}[INFO] =================================${RESET}"
+echo -e "${GREEN}[INFO] FILES CREATED${RESET}"
+echo -e "${GREEN}[INFO] =================================${RESET}"
+echo -e "${GREEN}[INFO] Nuclei results: $NUCLEI_RESULTS${RESET}"
+echo -e "${GREEN}[INFO] XSStrike results: $XSSTRIKE_RESULTS${RESET}"
+echo -e "${GREEN}[INFO] Dalfox results: $DALFOX_RESULTS${RESET}"
+echo -e "${GREEN}[INFO] Filtered URLs: $FILTERED_URLS_FILE${RESET}"
 echo -e "${GREEN}[INFO] Automation completed successfully!${RESET}"
 
 # Check if any tool found vulnerabilities
 if [ ! -s "$NUCLEI_RESULTS" ] && [ ! -s "$XSSTRIKE_RESULTS" ] && [ ! -s "$DALFOX_RESULTS" ]; then
-    echo -e "${GREEN}[INFO] No vulnerable URLs found.${RESET}"
+    echo -e "${GREEN}[INFO] =================================${RESET}"
+    echo -e "${GREEN}[INFO] STATUS: No vulnerabilities found${RESET}"
 else
-    echo -e "${GREEN}[INFO] Vulnerabilities were detected. Check result files for details.${RESET}"
+    echo -e "${GREEN}[INFO] =================================${RESET}"
+    echo -e "${GREEN}[INFO] STATUS: Vulnerabilities detected!${RESET}"
 fi
 
 # Cleanup temporary files
