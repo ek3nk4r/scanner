@@ -54,7 +54,20 @@ fi
 
 # Step 2: Filter URLs with query parameters
 echo -e "${GREEN}[INFO] Filtering URLs with query parameters...${RESET}"
-grep -E '\?[^=]+=.+$' "$GAU_FILE" | uro | sort -u > "$FILTERED_URLS_FILE"
+# First filter URLs with query parameters, then use uro safely
+grep -E '\?[^=]+=.+$' "$GAU_FILE" > temp_urls.txt
+if [ -s "temp_urls.txt" ]; then
+    # Try uro first, fallback to simple filtering if it fails
+    cat temp_urls.txt | uro > "$FILTERED_URLS_FILE" 2>/dev/null || {
+        echo -e "${GREEN}[INFO] uro failed, using simple filtering...${RESET}"
+        # Simple filtering: remove duplicates and basic cleaning
+        cat temp_urls.txt | sort -u | grep -v '^\s*$' > "$FILTERED_URLS_FILE"
+    }
+else
+    echo "No URLs with query parameters found"
+    touch "$FILTERED_URLS_FILE"
+fi
+rm -f temp_urls.txt
 
 # Step 3: XSS Testing with XSStrike and Dalfox
 echo -e "${GREEN}[INFO] Running XSStrike for XSS testing...${RESET}"
