@@ -10,7 +10,7 @@ echo -e "${RED}"
 echo -e "${RESET}"
 
 # Ensure required tools are installed
-REQUIRED_TOOLS=("gau" "uro" "httpx" "nuclei")
+REQUIRED_TOOLS=("gau" "waybackurls" "uro" "httpx" "nuclei" "xsstrike" "dalfox")
 for tool in "${REQUIRED_TOOLS[@]}"; do
     if ! command -v "$tool" &>/dev/null; then
         echo -e "${RED}[ERROR] $tool is not installed. Please install it and try again.${RESET}"
@@ -32,34 +32,63 @@ TARGET=$(echo "$TARGET_URL" | sed 's|https\?://||g')
 
 # Create temporary files
 GAU_FILE=$(mktemp)
+WAYBACK_FILE=$(mktemp)
 FILTERED_URLS_FILE="filtered_urls.txt"
 NUCLEI_RESULTS="nuclei_results.txt"
+XSSTRIKE_RESULTS="xsstrike_results.txt"
+DALFOX_RESULTS="dalfox_results.txt"
 
-# Step 1: Fetch URLs in Parallel using xargs
-echo -e "${GREEN}[INFO] Fetching URLs using gau in parallel...${RESET}"
-echo "$TARGET" | xargs -P10 -I{} sh -c 'gau "{}" >> "$1"' _ "$GAU_FILE"
+# Step 1: Fetch URLs using multiple sources
+echo -e "${GREEN}[INFO] Fetching URLs using gau...${RESET}"
+echo "$TARGET" | xargs -P10 -I{} sh -c 'gau "{}" >> "'$GAU_FILE'"' -- {}
+
+# Fallback to waybackurls if gau found nothing
+if [ ! -s "$GAU_FILE" ]; then
+    echo -e "${GREEN}[INFO] Gau found nothing, trying waybackurls...${RESET}"
+    echo "$TARGET" | waybackurls >> "$WAYBACK_FILE"
+    # Combine results if waybackurls found something
+    if [ -s "$WAYBACK_FILE" ]; then
+        cat "$WAYBACK_FILE" > "$GAU_FILE"
+    fi
+fi
 
 # Step 2: Filter URLs with query parameters
 echo -e "${GREEN}[INFO] Filtering URLs with query parameters...${RESET}"
 grep -E '\?[^=]+=.+$' "$GAU_FILE" | uro | sort -u > "$FILTERED_URLS_FILE"
 
-# Step 3: Check live URLs using httpx
+# Step 3: XSS Testing with XSStrike and Dalfox
+echo -e "${GREEN}[INFO] Running XSStrike for XSS testing...${RESET}"
+if [ -s "$FILTERED_URLS_FILE" ]; then
+    xargs -a "$FILTERED_URLS_FILE" -I@ bash -c 'xsstrike -u "@" --fuzzer --quiet' >> "$XSSTRIKE_RESULTS" 2>/dev/null || true
+fi
+
+echo -e "${GREEN}[INFO] Running Dalfox for XSS testing...${RESET}"
+if [ -s "$FILTERED_URLS_FILE" ]; then
+    dalfox file "$FILTERED_URLS_FILE" --no-color --silent >> "$DALFOX_RESULTS" 2>/dev/null || true
+fi
+
+# Step 4: Check live URLs using httpx
 echo -e "${GREEN}[INFO] Checking for live URLs using httpx...${RESET}"
 httpx -silent -t 300 -rl 200 < "$FILTERED_URLS_FILE" > "$FILTERED_URLS_FILE.tmp"
 mv "$FILTERED_URLS_FILE.tmp" "$FILTERED_URLS_FILE"
 
-# Step 4: Run nuclei for DAST scanning
-echo -e "${GREEN}[INFO] Running nuclei for DAST scanning...${RESET}"
-nuclei -dast -retries 2 -silent -o "$NUCLEI_RESULTS" < "$FILTERED_URLS_FILE"
+# Step 5: Run nuclei for comprehensive scanning
+echo -e "${GREEN}[INFO] Running nuclei for comprehensive scanning...${RESET}"
+nuclei -t xss,ssrf,sqli,injection,redirect,exposure,misconfiguration,informational -severity low,medium,high,critical -retries 2 -silent -o "$NUCLEI_RESULTS" < "$FILTERED_URLS_FILE"
 
-# Step 5: Show saved results
+# Step 6: Show saved results
 echo -e "${GREEN}[INFO] Nuclei results saved to $NUCLEI_RESULTS${RESET}"
+echo -e "${GREEN}[INFO] XSStrike results saved to $XSSTRIKE_RESULTS${RESET}"
+echo -e "${GREEN}[INFO] Dalfox results saved to $DALFOX_RESULTS${RESET}"
 echo -e "${GREEN}[INFO] Filtered URLs saved to $FILTERED_URLS_FILE for manual testing.${RESET}"
 echo -e "${GREEN}[INFO] Automation completed successfully!${RESET}"
 
-# Check if Nuclei found any vulnerabilities
-if [ ! -s "$NUCLEI_RESULTS" ]; then
+# Check if any tool found vulnerabilities
+if [ ! -s "$NUCLEI_RESULTS" ] && [ ! -s "$XSSTRIKE_RESULTS" ] && [ ! -s "$DALFOX_RESULTS" ]; then
     echo -e "${GREEN}[INFO] No vulnerable URLs found.${RESET}"
 else
-    echo -e "${GREEN}[INFO] Vulnerabilities were detected. Check $NUCLEI_RESULTS for details.${RESET}"
+    echo -e "${GREEN}[INFO] Vulnerabilities were detected. Check result files for details.${RESET}"
 fi
+
+# Cleanup temporary files
+rm -f "$GAU_FILE" "$WAYBACK_FILE"
