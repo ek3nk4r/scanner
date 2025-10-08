@@ -72,12 +72,26 @@ rm -f temp_urls.txt
 # Step 3: XSS Testing with XSStrike and Dalfox
 echo -e "${GREEN}[INFO] Running XSStrike for XSS testing...${RESET}"
 if [ -s "$FILTERED_URLS_FILE" ]; then
-    xargs -a "$FILTERED_URLS_FILE" -I@ bash -c 'xsstrike -u "@" --fuzzer --quiet' >> "$XSSTRIKE_RESULTS" 2>/dev/null || true
+    echo -e "${GREEN}[INFO] XSStrike: Testing URLs with advanced XSS payloads...${RESET}"
+    xargs -a "$FILTERED_URLS_FILE" -I@ -P5 bash -c 'xsstrike -u "@" --fuzzer --delay 1 --threads 5 --skip-dom --quiet' >> "$XSSTRIKE_RESULTS" 2>/dev/null || true
 fi
 
 echo -e "${GREEN}[INFO] Running Dalfox for XSS testing...${RESET}"
 if [ -s "$FILTERED_URLS_FILE" ]; then
-    dalfox file "$FILTERED_URLS_FILE" --no-color --silent >> "$DALFOX_RESULTS" 2>/dev/null || true
+    echo -e "${GREEN}[INFO] Dalfox: Advanced XSS scanning with context awareness...${RESET}"
+    dalfox file "$FILTERED_URLS_FILE" \
+        --no-color \
+        --silent \
+        --deep-domxss \
+        --context-aware \
+        --waf-evasion \
+        --worker 50 \
+        --delay 1000 \
+        --only-poc 'g,v' \
+        --format plain \
+        --ignore-return '404,403' \
+        --skip-bav \
+        --skip-mining-all >> "$DALFOX_RESULTS" 2>/dev/null || true
 fi
 
 # Step 4: Check live URLs using httpx
